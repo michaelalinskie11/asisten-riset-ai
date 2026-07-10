@@ -1,0 +1,5 @@
+NusantaraByte adalah perusahaan teknologi fiktif yang didirikan pada tahun 2023 di Surabaya.
+Produk andalannya bernama "Lontara AI", sebuah asisten riset dokumen berbasis kecerdasan buatan.
+Harga langganan Lontara AI adalah Rp150.000 per bulan.
+CEO NusantaraByte bernama Michael Alinskie.
+Fitur unggulan Lontara AI adalah kemampuan menjawab pertanyaan dari dokumen PDF dengan menyertakan sumber kutipan.
