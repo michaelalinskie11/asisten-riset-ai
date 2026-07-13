@@ -1,6 +1,11 @@
+# Bahan untuk Streamlit (app.py) DAN backend FastAPI (main.py)
 streamlit
+fastapi
+uvicorn[standard]
 openai
 python-dotenv
-pypdf
-numpy
 requests
+pypdf
+python-multipart
+qdrant-client
+numpy
