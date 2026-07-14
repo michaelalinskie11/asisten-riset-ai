@@ -39,13 +39,11 @@ h1, h2, h3 { font-family: 'Fraunces', serif !important; color: #ece9e2 !importan
 #MainMenu, footer, [data-testid="stToolbar"] { visibility: hidden; }
 hr { border-color: rgba(236,233,226,0.08) !important; }
 
-/* Lebar konten utama biar terasa "produk" */
-[data-testid="stMain"] .block-container { max-width: 880px; padding-top: 10px; animation: fadeUp .6s ease both; }
+[data-testid="stMain"] .block-container { max-width: 900px; padding-top: 10px; animation: fadeUp .6s ease both; }
 
 @keyframes fadeUp { from {opacity:0; transform:translateY(16px);} to {opacity:1; transform:translateY(0);} }
 @keyframes floaty { 0%,100% {transform:translateY(0);} 50% {transform:translateY(-4px);} }
 @keyframes glowpulse { 0%,100% {box-shadow:0 0 0 rgba(217,164,65,0);} 50% {box-shadow:0 0 24px rgba(217,164,65,0.11);} }
-@keyframes shimmer { to { background-position: 200% center; } }
 
 /* ---------- SIDEBAR ---------- */
 [data-testid="stSidebar"] {
@@ -76,7 +74,7 @@ hr { border-color: rgba(236,233,226,0.08) !important; }
 /* ---------- FILE UPLOADER ---------- */
 [data-testid="stFileUploaderDropzone"], [data-testid="stFileUploader"] section {
     background: #131315; border: 1.5px dashed rgba(217,164,65,0.40); border-radius: 16px;
-    padding: 20px 16px; transition: all .25s ease; animation: glowpulse 4s ease-in-out infinite;
+    padding: 26px 18px; transition: all .25s ease; animation: glowpulse 4s ease-in-out infinite;
 }
 [data-testid="stFileUploaderDropzone"]:hover, [data-testid="stFileUploader"] section:hover {
     border-color: rgba(217,164,65,0.9); background: #17171a; transform: translateY(-2px);
@@ -118,16 +116,14 @@ hr { border-color: rgba(236,233,226,0.08) !important; }
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-thumb { background: linear-gradient(#e0ad4c,#9c6f1f); border-radius: 5px; }
 
-/* ---------- EMPTY STATE ---------- */
-.empty { max-width:560px; margin:26px auto 0; text-align:center; padding:46px 34px;
-    border:1px solid rgba(236,233,226,0.09); border-radius:22px; animation: fadeUp .7s ease both;
-    background:radial-gradient(600px 260px at 50% -10%, rgba(217,164,65,0.08), transparent 60%), #0d0d0f; }
-.empty .em-mark { width:60px; height:60px; margin:0 auto 20px; border-radius:17px; display:grid; place-items:center;
+/* ---------- KARTU UNGGAH TENGAH ---------- */
+.hero-card { text-align:center; padding:8px 4px 4px; animation: fadeUp .7s ease both; }
+.hero-card .em-mark { width:60px; height:60px; margin:0 auto 20px; border-radius:17px; display:grid; place-items:center;
     font-size:28px; color:#0a0a0b; background:linear-gradient(135deg,#f8dd95,#d9a441);
     box-shadow:0 10px 28px rgba(217,164,65,.32); animation: floaty 4.5s ease-in-out infinite; }
-.empty .em-title { font-family:'Fraunces',serif; font-size:28px; color:#ece9e2; margin-bottom:12px; }
-.empty .em-sub { font-family:'Inter',sans-serif; font-size:14.5px; color:#b8b6b0; line-height:1.65; }
-.empty .em-hint { font-family:'Space Mono',monospace; font-size:11px; letter-spacing:2px; color:#d9a441; margin-top:22px; text-transform:uppercase; }
+.hero-card .em-title { font-family:'Fraunces',serif; font-size:30px; color:#ece9e2; margin-bottom:12px; }
+.hero-card .em-sub { font-family:'Inter',sans-serif; font-size:14.5px; color:#b8b6b0; line-height:1.65; max-width:460px; margin:0 auto 6px; }
+.hero-card .em-hint { font-family:'Space Mono',monospace; font-size:10.5px; letter-spacing:2px; color:#d9a441; margin-top:20px; margin-bottom:6px; text-transform:uppercase; }
 </style>""", unsafe_allow_html=True)
 
 # ================= HERO — gaya Cendekia (obsidian + emas + Fraunces) =================
@@ -196,10 +192,29 @@ def kemiripan(a, b):
     a, b = np.array(a), np.array(b)
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
+def proses_file(file):
+    """Baca PDF -> potong -> embed -> simpan ke session, lalu segarkan tampilan."""
+    with st.spinner("Memproses dokumen..."):
+        reader = PdfReader(file)
+        teks = ""
+        for hal in reader.pages:
+            t = hal.extract_text()
+            if t:
+                teks += t + "\n"
+        chunks = potong(teks)
+        st.session_state.chunks = chunks
+        st.session_state.vectors = embed(chunks)
+        st.session_state.nama_file = file.name
+        st.session_state.jumlah = len(chunks)
+        st.session_state.messages = []
+    st.rerun()
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ================= SIDEBAR =================
+aktif = bool(st.session_state.get("nama_file"))
+
+# ================= SIDEBAR (ramping: brand + status) =================
 with st.sidebar:
     st.markdown("""<div class="brand">
       <div class="mark">✦</div>
@@ -207,47 +222,45 @@ with st.sidebar:
     </div>""", unsafe_allow_html=True)
     st.caption("Asisten riset dokumen ber-AI — membaca, memahami, menjawab dengan sumber.")
     st.divider()
-    st.markdown('<div class="sec-label">Dokumen</div>', unsafe_allow_html=True)
-    file = st.file_uploader("Unggah dokumen PDF", type="pdf", label_visibility="collapsed")
-    if file and st.session_state.get("nama_file") != file.name:
-        with st.spinner("Memproses dokumen..."):
-            reader = PdfReader(file)
-            teks = ""
-            for hal in reader.pages:
-                t = hal.extract_text()
-                if t:
-                    teks += t + "\n"
-            chunks = potong(teks)
-            st.session_state.chunks = chunks
-            st.session_state.vectors = embed(chunks)
-            st.session_state.nama_file = file.name
-            st.session_state.jumlah = len(chunks)
-            st.session_state.messages = []
-        st.success(f"'{file.name}' siap — {len(chunks)} bagian.")
-    if st.session_state.get("nama_file"):
+    if aktif:
+        st.markdown('<div class="sec-label">Dokumen aktif</div>', unsafe_allow_html=True)
         st.markdown(
             f'<div class="doc-chip"><div class="doc-ic">📄</div>'
-            f'<div><div class="doc-l">Dokumen aktif · {st.session_state.get("jumlah", 0)} bagian</div>'
+            f'<div><div class="doc-l">{st.session_state.get("jumlah", 0)} bagian terindeks</div>'
             f'<div class="doc-n">{st.session_state.nama_file}</div></div></div>',
             unsafe_allow_html=True,
         )
         st.write("")
+        if st.button("🔄  Ganti dokumen", use_container_width=True):
+            for k in ("nama_file", "chunks", "vectors", "jumlah", "messages"):
+                st.session_state.pop(k, None)
+            st.rerun()
         if st.button("🗑️  Bersihkan percakapan", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
+    else:
+        st.markdown('<div class="sec-label">Status</div>', unsafe_allow_html=True)
+        st.caption("Belum ada dokumen. Unggah PDF di tengah layar untuk memulai.")
     st.divider()
     st.caption("Dibuat oleh Michael Alinskie · Groq + Jina AI")
 
-# ================= CHAT =================
-if not st.session_state.get("nama_file"):
-    st.markdown("""<div class="empty">
-      <div class="em-mark">✦</div>
-      <div class="em-title">Selamat datang di Cendekia</div>
-      <div class="em-sub">Unggah sebuah dokumen PDF pada panel di sebelah kiri untuk memulai. Cendekia akan membaca dokumenmu, memahami maknanya, lalu menjawab pertanyaanmu — lengkap dengan sumber yang bisa kamu percaya.</div>
-      <div class="em-hint">← Mulai dari panel kiri</div>
-    </div>""", unsafe_allow_html=True)
+# ================= AREA TENGAH =================
+if not aktif:
+    # Kartu unggah di tengah — satu frame rapi
+    kiri, tengah, kanan = st.columns([1, 2.1, 1])
+    with tengah:
+        st.markdown("""<div class="hero-card">
+          <div class="em-mark">✦</div>
+          <div class="em-title">Mulai dari sebuah dokumen</div>
+          <div class="em-sub">Unggah berkas PDF-mu di bawah ini. Cendekia akan membacanya, memahami maknanya, lalu siap menjawab pertanyaanmu — lengkap dengan sumber tepercaya.</div>
+          <div class="em-hint">↓ Letakkan atau pilih berkas PDF</div>
+        </div>""", unsafe_allow_html=True)
+        file = st.file_uploader("Unggah dokumen PDF", type="pdf", label_visibility="collapsed", key="pdf_center")
+        if file:
+            proses_file(file)
     st.stop()
 
+# ================= CHAT (setelah dokumen aktif) =================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
