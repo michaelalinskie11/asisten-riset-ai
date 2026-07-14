@@ -1,4 +1,7 @@
 import os
+import ast
+import json
+import operator
 import numpy as np
 import requests
 import streamlit as st
@@ -209,6 +212,124 @@ def proses_file(file):
         st.session_state.messages = []
     st.rerun()
 
+# ================= AGEN (Fase 6 — tool-calling) =================
+MODEL_AGEN = "llama-3.3-70b-versatile"
+MODEL_AGEN_CADANGAN = "llama-3.1-8b-instant"
+
+
+def cari_dokumen(pertanyaan):
+    """Alat: cari potongan relevan di dokumen aktif (RAG)."""
+    q = embed([pertanyaan])[0]
+    skor = sorted(
+        [(kemiripan(q, v), i) for i, v in enumerate(st.session_state.get("vectors", []))],
+        reverse=True,
+    )[:5]
+    return "\n---\n".join(st.session_state.chunks[i] for _, i in skor)
+
+
+_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub,
+    ast.Mult: operator.mul, ast.Div: operator.truediv,
+    ast.Pow: operator.pow, ast.Mod: operator.mod,
+    ast.USub: operator.neg, ast.UAdd: operator.pos,
+}
+
+
+def _nilai(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp):
+        return _OPS[type(node.op)](_nilai(node.left), _nilai(node.right))
+    if isinstance(node, ast.UnaryOp):
+        return _OPS[type(node.op)](_nilai(node.operand))
+    raise ValueError("Ekspresi tidak diizinkan")
+
+
+def hitung(ekspresi):
+    """Alat: kalkulator aman untuk ekspresi aritmatika."""
+    return str(_nilai(ast.parse(ekspresi, mode="eval").body))
+
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "cari_dokumen",
+            "description": "Cari informasi di dalam dokumen yang diunggah. Gunakan untuk pertanyaan tentang isi dokumen.",
+            "parameters": {
+                "type": "object",
+                "properties": {"pertanyaan": {"type": "string", "description": "Pertanyaan atau kata kunci"}},
+                "required": ["pertanyaan"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hitung",
+            "description": "Hitung ekspresi matematika, mis. '450000 * 12'.",
+            "parameters": {
+                "type": "object",
+                "properties": {"ekspresi": {"type": "string", "description": "Ekspresi aritmatika"}},
+                "required": ["ekspresi"],
+            },
+        },
+    },
+]
+FUNGSI = {"cari_dokumen": cari_dokumen, "hitung": hitung}
+
+SISTEM_AGEN = """Kamu adalah Agen Riset Cendekia yang cerdas dan teliti.
+Pikirkan langkah demi langkah. Untuk pertanyaan tentang isi dokumen, panggil 'cari_dokumen'.
+Untuk perhitungan angka, panggil 'hitung'. Kamu boleh memanggil beberapa alat berurutan
+(mis. cari harga dulu, lalu hitung totalnya). Jawab HANYA berdasarkan hasil alat; jika tidak
+ada di dokumen, katakan dengan jujur. Jawab dalam Bahasa Indonesia yang jelas dan ringkas."""
+
+
+def _chat_agen(messages):
+    for model in (MODEL_AGEN, MODEL_AGEN_CADANGAN):
+        try:
+            return client.chat.completions.create(
+                model=model, messages=messages, tools=TOOLS, temperature=0.2
+            )
+        except Exception:
+            continue
+    raise RuntimeError("Gagal memanggil model.")
+
+
+def jalankan_agen_ui(pertanyaan, maks_langkah=5):
+    """Loop agen memakai riwayat percakapan sebagai memori; kembalikan (jawaban, langkah)."""
+    messages = [{"role": "system", "content": SISTEM_AGEN}]
+    for m in st.session_state.get("messages", []):
+        if m["role"] in ("user", "assistant"):
+            messages.append({"role": m["role"], "content": m["content"]})
+    langkah = []
+    for _ in range(maks_langkah):
+        resp = _chat_agen(messages)
+        msg = resp.choices[0].message
+        if not msg.tool_calls:
+            return msg.content, langkah
+        messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in msg.tool_calls
+            ],
+        })
+        for tc in msg.tool_calls:
+            nama = tc.function.name
+            args = {}
+            try:
+                args = json.loads(tc.function.arguments)
+                hasil = FUNGSI[nama](**args)
+            except Exception as e:
+                hasil = f"Error: {e}"
+            langkah.append(f"🔧 {nama}({args}) → {str(hasil).replace(chr(10), ' ')[:80]}")
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(hasil)})
+    return "Maaf, terlalu banyak langkah tanpa jawaban akhir.", langkah
+
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -238,6 +359,14 @@ with st.sidebar:
         if st.button("🗑️  Bersihkan percakapan", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
+        st.divider()
+        st.markdown('<div class="sec-label">Mode</div>', unsafe_allow_html=True)
+        st.session_state.mode = st.radio(
+            "Mode",
+            ["⚡ Tanya Cepat", "🤖 Agen Riset"],
+            label_visibility="collapsed",
+        )
+        st.caption("Agen Riset dapat menghitung & merangkai beberapa langkah otomatis.")
     else:
         st.markdown('<div class="sec-label">Status</div>', unsafe_allow_html=True)
         st.caption("Belum ada dokumen. Unggah PDF di tengah layar untuk memulai.")
@@ -274,40 +403,51 @@ if pertanyaan := st.chat_input("Tanya sesuatu tentang dokumenmu..."):
     st.session_state.messages.append({"role": "user", "content": pertanyaan})
     with st.chat_message("user"):
         st.markdown(pertanyaan)
+    mode = st.session_state.get("mode", "⚡ Tanya Cepat")
     with st.chat_message("assistant"):
-        with st.spinner("Mencari bagian relevan..."):
-            q_vec = embed([pertanyaan])[0]
-            skor = sorted(
-                [(kemiripan(q_vec, v), i) for i, v in enumerate(st.session_state.vectors)],
-                reverse=True,
-            )
-            top = skor[:3]
-            konteks = "\n---\n".join(st.session_state.chunks[i] for _, i in top)
-        prompt = f"""Jawab pertanyaan HANYA berdasarkan konteks di bawah.
+        if mode == "🤖 Agen Riset":
+            with st.spinner("Agen sedang berpikir & memakai alat..."):
+                jawaban, langkah = jalankan_agen_ui(pertanyaan)
+            st.markdown(jawaban)
+            if langkah:
+                with st.expander("Langkah agen"):
+                    for baris in langkah:
+                        st.caption(baris)
+            st.session_state.messages.append({"role": "assistant", "content": jawaban})
+        else:
+            with st.spinner("Mencari bagian relevan..."):
+                q_vec = embed([pertanyaan])[0]
+                skor = sorted(
+                    [(kemiripan(q_vec, v), i) for i, v in enumerate(st.session_state.vectors)],
+                    reverse=True,
+                )
+                top = skor[:3]
+                konteks = "\n---\n".join(st.session_state.chunks[i] for _, i in top)
+            prompt = f"""Jawab pertanyaan HANYA berdasarkan konteks di bawah.
 Jika tidak ada, katakan "Tidak ada di dokumen."
 
 KONTEKS:
 {konteks}
 
 Pertanyaan: {pertanyaan}"""
-        stream = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            stream=True,
-        )
-        def alir():
-            for bagian in stream:
-                isi = bagian.choices[0].delta.content
-                if isi:
-                    yield isi
-        jawaban = st.write_stream(alir())
-        sumber = [(nilai, st.session_state.chunks[i]) for nilai, i in top]
-        with st.expander("Lihat sumber"):
-            for nilai, teks in sumber:
-                st.markdown(f"**Kemiripan {nilai:.2f}**")
-                st.caption(teks)
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": jawaban,
-        "sumber": sumber,
-    })
+            stream = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+            )
+            def alir():
+                for bagian in stream:
+                    isi = bagian.choices[0].delta.content
+                    if isi:
+                        yield isi
+            jawaban = st.write_stream(alir())
+            sumber = [(nilai, st.session_state.chunks[i]) for nilai, i in top]
+            with st.expander("Lihat sumber"):
+                for nilai, teks in sumber:
+                    st.markdown(f"**Kemiripan {nilai:.2f}**")
+                    st.caption(teks)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": jawaban,
+                "sumber": sumber,
+            })
