@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+qdrant_data/
+embeddings.json
+cache.json
+jejak.jsonl
+.git/
+.github/
+node_modules/
+cendekia-web/
+.pytest_cache/
+*.md

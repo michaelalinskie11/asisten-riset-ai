@@ -3,3 +3,5 @@ venv/
 embeddings.json
 __pycache__/
 qdrant_data/
+cache.json
+jejak.json1

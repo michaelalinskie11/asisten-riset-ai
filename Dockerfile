@@ -1,15 +1,22 @@
-# Resep build untuk Hugging Face Spaces (Docker)
 FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# Pasang bahan lebih dulu (biar cache build efisien)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Dependensi sistem (psycopg2 butuh libpq)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Salin sisa kode (main.py, dll.)
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
 COPY . .
 
-# Hugging Face Spaces mengharapkan aplikasi berjalan di port 7860
-EXPOSE 7860
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860"]
+EXPOSE 8000
+
+# Railway/Fly mengirim $PORT otomatis; default 8000 untuk lokal
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]

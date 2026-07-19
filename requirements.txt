@@ -9,3 +9,5 @@ pypdf
 python-multipart
 qdrant-client
 numpy
+psycopg2-binary
+ddgs

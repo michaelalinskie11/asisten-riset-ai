@@ -1,0 +1,3 @@
+{"waktu": "2026-07-14T19:27:02", "model": "llama-3.1-8b-instant", "latency_dtk": 0.813, "token_input": 47, "token_output": 47, "token_total": 94, "biaya_usd": 6.11e-06, "galat": null}
+{"waktu": "2026-07-14T19:27:03", "model": "llama-3.3-70b-versatile", "latency_dtk": 0.445, "token_input": 49, "token_output": 70, "token_total": 119, "biaya_usd": 8.421e-05, "galat": null}
+{"waktu": "2026-07-14T19:27:03", "model": "llama-3.1-8b-instant", "latency_dtk": 0.224, "token_input": 48, "token_output": 46, "token_total": 94, "biaya_usd": 6.08e-06, "galat": null}
